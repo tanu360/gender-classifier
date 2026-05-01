@@ -4,9 +4,29 @@ import subprocess
 import importlib.util
 import shutil
 import time
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import Any
+
+
+def configure_native_runtime():
+    """Keep native ML/image libraries from oversubscribing CPU threads."""
+    thread_env_defaults = {
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "VECLIB_MAXIMUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+        "TF_NUM_INTRAOP_THREADS": "1",
+        "TF_NUM_INTEROP_THREADS": "1",
+        "TF_CPP_MIN_LOG_LEVEL": "2",
+    }
+    for name, value in thread_env_defaults.items():
+        os.environ.setdefault(name, value)
+
+
+configure_native_runtime()
 
 
 def install(package, import_name=None):
@@ -24,13 +44,19 @@ deps = [
     ("pillow", "PIL"),
     ("tf-keras", "tf_keras"),
     ("opencv-python", "cv2"),
-    ("emoji", "emoji"),
 ]
 
 for pkg, imp in deps:
     install(pkg, imp)
 import emoji  # noqa: E402
 import numpy as np  # noqa: E402
+import cv2  # noqa: E402
+
+try:
+    cv2.setNumThreads(1)
+    cv2.ocl.setUseOpenCL(False)
+except Exception:
+    pass
 
 from deepface import DeepFace  # noqa: E402
 from colorama import init, Fore, Style  # noqa: E402
@@ -42,13 +68,26 @@ init(autoreset=True)
 
 # Global configuration
 SUPPORTED_FORMATS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
-MAX_WORKERS = 4  # Adjust based on your CPU cores
+DEFAULT_WORKERS = 1
 CATEGORY_FILENAME_PREFIXES = {
     "male": "male",
     "female": "female",
     "no_human": "no-human",
     "error": "error",
 }
+
+
+def get_worker_count():
+    """Read worker count from env, defaulting to the stable single-worker path."""
+    raw_value = os.environ.get("GENDER_CLASSIFIER_WORKERS", str(DEFAULT_WORKERS))
+    try:
+        return max(1, int(raw_value))
+    except ValueError:
+        print(
+            Fore.YELLOW
+            + f"{EMOJI['warning']} Invalid GENDER_CLASSIFIER_WORKERS={raw_value!r}; using {DEFAULT_WORKERS}."
+        )
+        return DEFAULT_WORKERS
 
 
 def emj(name):
@@ -95,6 +134,7 @@ class GenderClassifier:
             "no_human": 0,
             "error": 0,
         }
+        self.analysis_lock = Lock()
 
     def print_banner(self):
         print(
@@ -108,7 +148,7 @@ class GenderClassifier:
         )
         print(
             Fore.CYAN
-            + f"{EMOJI['speed']} Multi-threaded processing for speed {EMOJI['speed']}"
+            + f"{EMOJI['speed']} Crash-safe AI processing {EMOJI['speed']}"
         )
         print(Fore.CYAN + f"{EMOJI['folder']} Auto-organizes images by gender\n")
 
@@ -260,22 +300,23 @@ class GenderClassifier:
                 detectors = ["opencv", "retinaface"]
                 result = None
 
-                for detector in detectors:
-                    try:
-                        result = DeepFace.analyze(
-                            img_path=image_path,
-                            actions=["gender"],
-                            enforce_detection=False,
-                            silent=True,
-                            detector_backend=detector,
-                        )
-                        break  # Success, exit loop
-                    except Exception as e:
-                        print(
-                            Fore.YELLOW
-                            + f"{EMOJI['warning']} Failed to analyze with {detector}: {e}"
-                        )
-                        continue  # Try next detector
+                with self.analysis_lock:
+                    for detector in detectors:
+                        try:
+                            result = DeepFace.analyze(
+                                img_path=image_path,
+                                actions=["gender"],
+                                enforce_detection=False,
+                                silent=True,
+                                detector_backend=detector,
+                            )
+                            break  # Success, exit loop
+                        except Exception as e:
+                            print(
+                                Fore.YELLOW
+                                + f"{EMOJI['warning']} Failed to analyze with {detector}: {e}"
+                            )
+                            continue  # Try next detector
 
                 # If both detectors failed
                 if result is None:
@@ -381,20 +422,31 @@ class GenderClassifier:
             }
 
     def process_images_parallel(self, image_files, output_folders):
-        """Process images using multiple threads"""
+        """Process images with a stable default and optional guarded threads."""
         print(Fore.CYAN + f"\n{EMOJI['robot']} Initializing AI models...")
 
         # Pre-download model by testing on a dummy image to avoid parallel download conflicts
         try:
             test_img = np.zeros((100, 100, 3), dtype=np.uint8)
-            test_path = "temp_test.jpg"
-            Image.fromarray(test_img).save(test_path)
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_file:
+                test_path = temp_file.name
 
-            # This will download the model if not already present
-            DeepFace.analyze(
-                test_path, actions=["gender"], enforce_detection=False, silent=True
-            )
-            os.remove(test_path)  # Clean up
+            try:
+                Image.fromarray(test_img).save(test_path)
+
+                # This will download the model if not already present
+                with self.analysis_lock:
+                    DeepFace.analyze(
+                        test_path,
+                        actions=["gender"],
+                        enforce_detection=False,
+                        silent=True,
+                        detector_backend="opencv",
+                    )
+            finally:
+                if os.path.exists(test_path):
+                    os.remove(test_path)
+
             print(Fore.GREEN + f"{EMOJI['success']} AI models ready!")
         except Exception as e:
             print(Fore.YELLOW + f"{EMOJI['warning']}  Model initialization failed: {e}")
@@ -404,10 +456,17 @@ class GenderClassifier:
             )
             return  # Exit the function early
 
-        print(
-            Fore.CYAN
-            + f"{EMOJI['rocket']} Starting parallel processing with {MAX_WORKERS} workers..."
-        )
+        worker_count = get_worker_count()
+        if worker_count == 1:
+            print(
+                Fore.CYAN
+                + f"{EMOJI['rocket']} Starting crash-safe processing with 1 worker..."
+            )
+        else:
+            print(
+                Fore.CYAN
+                + f"{EMOJI['rocket']} Starting guarded threaded processing with {worker_count} workers..."
+            )
         print(
             Fore.YELLOW
             + f"{EMOJI['chart']} Total images to process: {len(image_files)}\n"
@@ -415,26 +474,31 @@ class GenderClassifier:
 
         start_time = time.time()
 
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            # Submit all tasks
-            future_to_image = {
-                executor.submit(
-                    self.classify_single_image, img_path, output_folders
-                ): img_path
-                for img_path in image_files
-            }
+        if worker_count == 1:
+            for image_path in image_files:
+                result = self.classify_single_image(image_path, output_folders)
+                self.print_progress(result, len(image_files))
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                # Submit all tasks
+                future_to_image = {
+                    executor.submit(
+                        self.classify_single_image, img_path, output_folders
+                    ): img_path
+                    for img_path in image_files
+                }
 
-            # Process completed tasks
-            for future in as_completed(future_to_image):
-                image_path = future_to_image[future]
-                try:
-                    result = future.result()
-                    self.print_progress(result, len(image_files))
-                except Exception as e:
-                    print(
-                        Fore.RED
-                        + f"{EMOJI['error']} Error processing {os.path.basename(image_path)}: {e}"
-                    )
+                # Process completed tasks
+                for future in as_completed(future_to_image):
+                    image_path = future_to_image[future]
+                    try:
+                        result = future.result()
+                        self.print_progress(result, len(image_files))
+                    except Exception as e:
+                        print(
+                            Fore.RED
+                            + f"{EMOJI['error']} Error processing {os.path.basename(image_path)}: {e}"
+                        )
 
         end_time = time.time()
         self.print_summary(len(image_files), end_time - start_time)

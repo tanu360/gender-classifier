@@ -1,7 +1,7 @@
 <div align="center">
   <h1>AI Gender Classifier</h1>
 
-  <h3>Batch image classification with DeepFace, threaded processing, and clean output folders</h3>
+  <h3>Batch image classification with DeepFace, crash-safe processing, and clean output folders</h3>
 
   <p>
     <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" /></a>
@@ -27,7 +27,7 @@
 
 AI Gender Classifier is a Python CLI tool that scans a folder of images, uses **DeepFace** to predict visible gender presentation, and copies images into organized output folders.
 
-It supports recursive folder scanning, image validation, DeepFace detector fallback, multi-threaded processing, category-prefixed filenames, and a colorful terminal summary.
+It supports recursive folder scanning, image validation, DeepFace detector fallback, crash-safe processing, category-prefixed filenames, and a colorful terminal summary.
 
 > Important: this tool predicts model labels from image appearance. Do not use it for identity verification, access control, sensitive decisions, or assumptions about a person's actual gender identity.
 
@@ -39,7 +39,9 @@ It supports recursive folder scanning, image validation, DeepFace detector fallb
 - **OpenCV detector first**, then **RetinaFace fallback**
 - **Recursive image scanning** for nested folders
 - **Skips `classified_images`** on reruns to prevent re-processing output
-- **Thread-safe counters** for reliable parallel processing
+- **Crash-safe single-worker default** to avoid TensorFlow/OpenCV native thread crashes
+- **Guarded threaded mode** via `GENDER_CLASSIFIER_WORKERS`
+- **Thread-safe counters** for reliable output numbering
 - **Overwrite-safe filenames** like `male-1.jpg`, `female-1.jpg`
 - **Existing output detection** so numbering continues after old files
 - **Image validation** using Pillow before AI analysis
@@ -60,7 +62,7 @@ It supports recursive folder scanning, image validation, DeepFace detector fallb
 | Face detector fallback | RetinaFace |
 | Image handling | Pillow, OpenCV |
 | Terminal UI | Colorama, Emoji |
-| Parallelism | `ThreadPoolExecutor` |
+| Processing mode | Stable single-worker default; optional guarded `ThreadPoolExecutor` |
 
 ---
 
@@ -164,7 +166,13 @@ You can edit these values in `main.py`:
 
 ```python
 SUPPORTED_FORMATS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
-MAX_WORKERS = 4
+DEFAULT_WORKERS = 1
+```
+
+The app defaults to one worker because DeepFace, TensorFlow, OpenCV, and RetinaFace can segfault under concurrent inference on some systems. To experiment with guarded threaded processing:
+
+```bash
+GENDER_CLASSIFIER_WORKERS=2 python3 main.py
 ```
 
 Filename prefixes are also configurable:
@@ -217,6 +225,7 @@ If you delete these files, DeepFace will download them again on a future run.
 | `python: command not found` | Use `python3 main.py` |
 | Package import error | Run `python3 -m pip install -r requirements.txt` |
 | First run is slow | DeepFace may be downloading model weights |
+| Segmentation fault during processing | Run the latest code; it defaults to crash-safe single-worker inference. Avoid raising `GENDER_CLASSIFIER_WORKERS` unless your local TensorFlow/OpenCV stack is stable. |
 | No images found | Check supported extensions and folder path |
 | Output images appear again on rerun | Make sure you are running the latest code; `classified_images` is skipped |
 | TensorFlow warnings | Usually safe if classification still runs |

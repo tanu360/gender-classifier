@@ -43,6 +43,12 @@ init(autoreset=True)
 # Global configuration
 SUPPORTED_FORMATS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
 MAX_WORKERS = 4  # Adjust based on your CPU cores
+CATEGORY_FILENAME_PREFIXES = {
+    "male": "male",
+    "female": "female",
+    "no_human": "no-human",
+    "error": "error",
+}
 
 
 def emj(name):
@@ -205,22 +211,37 @@ class GenderClassifier:
         return folders
 
     def initialize_file_counters(self, output_folders):
-        """Start output filenames after any existing numbered files."""
+        """Start output filenames after any existing category-prefixed files."""
         self.file_counters = {
-            "male": self.get_highest_existing_index(output_folders["male"]),
-            "female": self.get_highest_existing_index(output_folders["female"]),
-            "no_human": self.get_highest_existing_index(output_folders["no_human"]),
-            "error": self.get_highest_existing_index(output_folders["errors"]),
+            "male": self.get_highest_existing_index(
+                output_folders["male"], CATEGORY_FILENAME_PREFIXES["male"]
+            ),
+            "female": self.get_highest_existing_index(
+                output_folders["female"], CATEGORY_FILENAME_PREFIXES["female"]
+            ),
+            "no_human": self.get_highest_existing_index(
+                output_folders["no_human"], CATEGORY_FILENAME_PREFIXES["no_human"]
+            ),
+            "error": self.get_highest_existing_index(
+                output_folders["errors"], CATEGORY_FILENAME_PREFIXES["error"]
+            ),
         }
 
     @staticmethod
-    def get_highest_existing_index(folder_path):
-        """Find the highest numeric filename stem in an output folder."""
+    def get_highest_existing_index(folder_path, filename_prefix):
+        """Find the highest index from files like male-1.jpg."""
         highest_index = 0
+        expected_prefix = f"{filename_prefix}-"
         for filename in os.listdir(folder_path):
             stem, ext = os.path.splitext(filename)
-            if ext.lower() in SUPPORTED_FORMATS and stem.isdigit():
-                highest_index = max(highest_index, int(stem))
+            if ext.lower() not in SUPPORTED_FORMATS:
+                continue
+            if not stem.startswith(expected_prefix):
+                continue
+
+            index_text = stem.removeprefix(expected_prefix)
+            if index_text.isdigit():
+                highest_index = max(highest_index, int(index_text))
         return highest_index
 
     def classify_single_image(self, image_path, output_folders):
@@ -316,9 +337,10 @@ class GenderClassifier:
             file_ext = os.path.splitext(src_path)[1].lower()
 
             with self.counter_lock:
+                filename_prefix = CATEGORY_FILENAME_PREFIXES[category]
                 next_index = self.file_counters[category] + 1
                 while True:
-                    new_filename = f"{next_index}{file_ext}"
+                    new_filename = f"{filename_prefix}-{next_index}{file_ext}"
                     dest_path = os.path.join(dest_folder, new_filename)
                     if not os.path.exists(dest_path):
                         break

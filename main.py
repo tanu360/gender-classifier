@@ -3,9 +3,9 @@ import sys
 import subprocess
 import importlib.util
 import shutil
-import glob
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from typing import Any
 
 
@@ -82,6 +82,13 @@ class GenderClassifier:
         self.no_human_counter = 0
         self.error_counter = 0
         self.total_processed = 0
+        self.counter_lock = Lock()
+        self.file_counters = {
+            "male": 0,
+            "female": 0,
+            "no_human": 0,
+            "error": 0,
+        }
 
     def print_banner(self):
         print(
@@ -146,14 +153,35 @@ class GenderClassifier:
     def get_image_files(self, folder_path):
         """Get all supported image files from folder"""
         image_files = []
-        for ext in SUPPORTED_FORMATS:
-            pattern = os.path.join(folder_path, f"**/*{ext}")
-            image_files.extend(glob.glob(pattern, recursive=True))
-            # Also check uppercase extensions
-            pattern = os.path.join(folder_path, f"**/*{ext.upper()}")
-            image_files.extend(glob.glob(pattern, recursive=True))
+        output_base = os.path.abspath(os.path.join(folder_path, "classified_images"))
+
+        for root, dirs, files in os.walk(folder_path):
+            if self.is_inside_path(root, output_base):
+                dirs[:] = []
+                continue
+
+            dirs[:] = [
+                dirname
+                for dirname in dirs
+                if not self.is_inside_path(os.path.join(root, dirname), output_base)
+            ]
+
+            for filename in files:
+                if filename.lower().endswith(SUPPORTED_FORMATS):
+                    image_files.append(os.path.join(root, filename))
 
         return sorted(list(set(image_files)))  # Remove duplicates and sort
+
+    @staticmethod
+    def is_inside_path(path, parent_path):
+        """Return True when path is inside parent_path."""
+        try:
+            return (
+                os.path.commonpath([os.path.abspath(path), os.path.abspath(parent_path)])
+                == os.path.abspath(parent_path)
+            )
+        except ValueError:
+            return False
 
     def setup_output_folders(self, input_folder):
         """Create output folder structure"""
@@ -169,10 +197,31 @@ class GenderClassifier:
         for folder in folders.values():
             os.makedirs(folder, exist_ok=True)
 
+        self.initialize_file_counters(folders)
+
         print(
             Fore.GREEN + f"{EMOJI['folder']} Output folders created at: {output_base}"
         )
         return folders
+
+    def initialize_file_counters(self, output_folders):
+        """Start output filenames after any existing numbered files."""
+        self.file_counters = {
+            "male": self.get_highest_existing_index(output_folders["male"]),
+            "female": self.get_highest_existing_index(output_folders["female"]),
+            "no_human": self.get_highest_existing_index(output_folders["no_human"]),
+            "error": self.get_highest_existing_index(output_folders["errors"]),
+        }
+
+    @staticmethod
+    def get_highest_existing_index(folder_path):
+        """Find the highest numeric filename stem in an output folder."""
+        highest_index = 0
+        for filename in os.listdir(folder_path):
+            stem, ext = os.path.splitext(filename)
+            if ext.lower() in SUPPORTED_FORMATS and stem.isdigit():
+                highest_index = max(highest_index, int(stem))
+        return highest_index
 
     def classify_single_image(self, image_path, output_folders):
         """Classify a single image and move to appropriate folder"""
@@ -262,36 +311,40 @@ class GenderClassifier:
             return self.move_image(image_path, output_folders["errors"], "error")
 
     def move_image(self, src_path, dest_folder, category):
-        """Move image to destination folder with sequential naming"""
+        """Copy image to destination folder with thread-safe sequential naming"""
         try:
-            # Get file extension
             file_ext = os.path.splitext(src_path)[1].lower()
 
-            # Generate sequential filename
-            if category == "male":
-                self.male_counter += 1
-                new_filename = f"{self.male_counter}{file_ext}"
-            elif category == "female":
-                self.female_counter += 1
-                new_filename = f"{self.female_counter}{file_ext}"
-            elif category == "no_human":
-                self.no_human_counter += 1
-                new_filename = f"{self.no_human_counter}{file_ext}"
-            else:  # error
-                self.error_counter += 1
-                new_filename = f"{self.error_counter}{file_ext}"
+            with self.counter_lock:
+                next_index = self.file_counters[category] + 1
+                while True:
+                    new_filename = f"{next_index}{file_ext}"
+                    dest_path = os.path.join(dest_folder, new_filename)
+                    if not os.path.exists(dest_path):
+                        break
+                    next_index += 1
 
-            dest_path = os.path.join(dest_folder, new_filename)
+                shutil.copy2(src_path, dest_path)
+                self.file_counters[category] = next_index
 
-            # Copy file to preserve original
-            shutil.copy2(src_path, dest_path)
+                if category == "male":
+                    self.male_counter += 1
+                elif category == "female":
+                    self.female_counter += 1
+                elif category == "no_human":
+                    self.no_human_counter += 1
+                else:
+                    self.error_counter += 1
 
-            self.total_processed += 1
+                self.total_processed += 1
+                processed_count = self.total_processed
+
             return {
                 "success": True,
                 "category": category,
                 "src": os.path.basename(src_path),
                 "dest": new_filename,
+                "processed_count": processed_count,
                 "error": None,
             }
 
@@ -301,6 +354,7 @@ class GenderClassifier:
                 "category": "error",
                 "src": os.path.basename(src_path),
                 "dest": None,
+                "processed_count": self.total_processed,
                 "error": str(e),
             }
 
@@ -365,6 +419,8 @@ class GenderClassifier:
 
     def print_progress(self, result, total_images):
         """Print progress for each processed image"""
+        processed_count = result.get("processed_count", self.total_processed)
+
         if result["success"]:
             if result["category"] == "male":
                 icon = EMOJI["male"]
@@ -380,12 +436,12 @@ class GenderClassifier:
                 color = Fore.RED
 
             print(
-                f"{color}{icon} [{self.total_processed}/{total_images}] {result['src']} → {result['dest']}"
+                f"{color}{icon} [{processed_count}/{total_images}] {result['src']} → {result['dest']}"
             )
         else:
             print(
                 Fore.RED
-                + f"{EMOJI['error']} [{self.total_processed}/{total_images}] Failed: {result['src']} - {result['error']}"
+                + f"{EMOJI['error']} [{processed_count}/{total_images}] Failed: {result['src']} - {result['error']}"
             )
 
     def print_summary(self, total_images, elapsed_time):

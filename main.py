@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 def install(package, import_name=None):
     check_name = import_name if import_name else package
     if importlib.util.find_spec(check_name) is None:
-        print(f"❓ Installing {package}...")
+        print(f"Installing {package}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", package, "-q"])
 
 
@@ -19,13 +19,16 @@ def install(package, import_name=None):
 deps = [
     ("deepface", "deepface"),
     ("colorama", "colorama"),
+    ("emoji", "emoji"),
     ("pillow", "PIL"),
     ("tf-keras", "tf_keras"),
     ("opencv-python", "cv2"),
+    ("emoji", "emoji"),
 ]
 
 for pkg, imp in deps:
     install(pkg, imp)
+import emoji  # noqa: E402
 import numpy as np  # noqa: E402
 
 from deepface import DeepFace  # noqa: E402
@@ -41,6 +44,36 @@ SUPPORTED_FORMATS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
 MAX_WORKERS = 4  # Adjust based on your CPU cores
 
 
+def emj(name):
+    return emoji.emojize(f":{name}:", language="alias")
+
+
+# Console icon set kept in one place so output text stays readable.
+EMOJI = {
+    "target": emj("dart"),
+    "family": f"{emj('man')}\u200d{emj('woman')}",
+    "robot": emj("robot_face"),
+    "speed": emj("zap"),
+    "folder": emj("file_folder"),
+    "open_folder": emj("open_file_folder"),
+    "point": emj("point_right"),
+    "error": emj("x"),
+    "success": emj("white_check_mark"),
+    "warning": emj("warning"),
+    "boom": emj("boom"),
+    "rocket": emj("rocket"),
+    "chart": emj("bar_chart"),
+    "male": emj("man"),
+    "female": emj("woman"),
+    "no_human": emj("no_entry_sign"),
+    "party": emj("tada"),
+    "stopwatch": emj("stopwatch"),
+    "clock": emj("clock1"),
+    "thinking": emj("thinking"),
+    "wave": emj("wave"),
+}
+
+
 class GenderClassifier:
     def __init__(self):
         self.male_counter = 0
@@ -50,43 +83,63 @@ class GenderClassifier:
         self.total_processed = 0
 
     def print_banner(self):
-        print(Fore.MAGENTA + Style.BRIGHT + "\n🎯 AI Gender Classification Tool 👨‍👩\n")
-        print(Fore.CYAN + "🤖 Powered by DeepFace AI Engine 🤖")
-        print(Fore.CYAN + "⚡ Multi-threaded processing for speed ⚡")
-        print(Fore.CYAN + "📁 Auto-organizes images by gender\n")
+        print(
+            Fore.MAGENTA
+            + Style.BRIGHT
+            + f"\n{EMOJI['target']} AI Gender Classification Tool {EMOJI['family']}\n"
+        )
+        print(
+            Fore.CYAN
+            + f"{EMOJI['robot']} Powered by DeepFace AI Engine {EMOJI['robot']}"
+        )
+        print(
+            Fore.CYAN
+            + f"{EMOJI['speed']} Multi-threaded processing for speed {EMOJI['speed']}"
+        )
+        print(Fore.CYAN + f"{EMOJI['folder']} Auto-organizes images by gender\n")
 
     def get_input_folder(self):
         """Get input folder from user with validation"""
-        print(Fore.YELLOW + "📂 Input Folder Selection")
+        print(Fore.YELLOW + f"{EMOJI['open_folder']} Input Folder Selection")
 
         while True:
             folder_path = input(
-                Fore.CYAN + "👉 Enter the folder path containing images: "
+                Fore.CYAN
+                + f"{EMOJI['point']} Enter the folder path containing images: "
             ).strip()
 
             if not folder_path:
-                print(Fore.RED + "❌ Please enter a valid folder path.")
+                print(Fore.RED + f"{EMOJI['error']} Please enter a valid folder path.")
                 continue
 
             if not os.path.exists(folder_path):
-                print(Fore.RED + f"❌ Folder not found: {folder_path}")
+                print(Fore.RED + f"{EMOJI['error']} Folder not found: {folder_path}")
                 continue
 
             if not os.path.isdir(folder_path):
-                print(Fore.RED + f"❌ Path is not a directory: {folder_path}")
+                print(
+                    Fore.RED
+                    + f"{EMOJI['error']} Path is not a directory: {folder_path}"
+                )
                 continue
 
             # Check for images in folder
             image_files = self.get_image_files(folder_path)
             if not image_files:
-                print(Fore.RED + "❌ No supported image files found in this folder.")
+                print(
+                    Fore.RED
+                    + f"{EMOJI['error']} No supported image files found in this folder."
+                )
                 print(
                     Fore.YELLOW
                     + f"   Supported formats: {', '.join(SUPPORTED_FORMATS)}"
                 )
                 continue
 
-            print(Fore.GREEN + f"✅ Found {len(image_files)} images in folder")
+            print(
+                Fore.GREEN
+                + f"{EMOJI['success']} Found {len(image_files)} images in folder"
+            )
             return folder_path, image_files
 
     def get_image_files(self, folder_path):
@@ -115,7 +168,9 @@ class GenderClassifier:
         for folder in folders.values():
             os.makedirs(folder, exist_ok=True)
 
-        print(Fore.GREEN + f"📁 Output folders created at: {output_base}")
+        print(
+            Fore.GREEN + f"{EMOJI['folder']} Output folders created at: {output_base}"
+        )
         return folders
 
     def classify_single_image(self, image_path, output_folders):
@@ -145,7 +200,10 @@ class GenderClassifier:
                         )
                         break  # Success, exit loop
                     except Exception as e:
-                        print(Fore.YELLOW + f"⚠️ Failed to analyze with {detector}: {e}")
+                        print(
+                            Fore.YELLOW
+                            + f"{EMOJI['warning']} Failed to analyze with {detector}: {e}"
+                        )
                         continue  # Try next detector
 
                 # If both detectors failed
@@ -233,7 +291,7 @@ class GenderClassifier:
 
     def process_images_parallel(self, image_files, output_folders):
         """Process images using multiple threads"""
-        print(Fore.CYAN + "\n🤖 Initializing AI models...")
+        print(Fore.CYAN + f"\n{EMOJI['robot']} Initializing AI models...")
 
         # Pre-download model by testing on a dummy image to avoid parallel download conflicts
         try:
@@ -246,16 +304,23 @@ class GenderClassifier:
                 test_path, actions=["gender"], enforce_detection=False, silent=True
             )
             os.remove(test_path)  # Clean up
-            print(Fore.GREEN + "✅ AI models ready!")
+            print(Fore.GREEN + f"{EMOJI['success']} AI models ready!")
         except Exception as e:
-            print(Fore.YELLOW + f"⚠️  Model initialization failed: {e}")
-            print(Fore.RED + "💥 Cannot proceed without AI models. Exiting...")
+            print(Fore.YELLOW + f"{EMOJI['warning']}  Model initialization failed: {e}")
+            print(
+                Fore.RED
+                + f"{EMOJI['boom']} Cannot proceed without AI models. Exiting..."
+            )
             return  # Exit the function early
 
         print(
-            Fore.CYAN + f"🚀 Starting parallel processing with {MAX_WORKERS} workers..."
+            Fore.CYAN
+            + f"{EMOJI['rocket']} Starting parallel processing with {MAX_WORKERS} workers..."
         )
-        print(Fore.YELLOW + f"📊 Total images to process: {len(image_files)}\n")
+        print(
+            Fore.YELLOW
+            + f"{EMOJI['chart']} Total images to process: {len(image_files)}\n"
+        )
 
         start_time = time.time()
 
@@ -277,7 +342,7 @@ class GenderClassifier:
                 except Exception as e:
                     print(
                         Fore.RED
-                        + f"❌ Error processing {os.path.basename(image_path)}: {e}"
+                        + f"{EMOJI['error']} Error processing {os.path.basename(image_path)}: {e}"
                     )
 
         end_time = time.time()
@@ -287,16 +352,16 @@ class GenderClassifier:
         """Print progress for each processed image"""
         if result["success"]:
             if result["category"] == "male":
-                icon = "👨"
+                icon = EMOJI["male"]
                 color = Fore.BLUE
             elif result["category"] == "female":
-                icon = "👩"
+                icon = EMOJI["female"]
                 color = Fore.MAGENTA
             elif result["category"] == "no_human":
-                icon = "🚫"
+                icon = EMOJI["no_human"]
                 color = Fore.YELLOW
             else:
-                icon = "❌"
+                icon = EMOJI["error"]
                 color = Fore.RED
 
             print(
@@ -305,35 +370,52 @@ class GenderClassifier:
         else:
             print(
                 Fore.RED
-                + f"❌ [{self.total_processed}/{total_images}] Failed: {result['src']} - {result['error']}"
+                + f"{EMOJI['error']} [{self.total_processed}/{total_images}] Failed: {result['src']} - {result['error']}"
             )
 
     def print_summary(self, total_images, elapsed_time):
         """Print final processing summary"""
         print(Fore.GREEN + Style.BRIGHT + "\n" + "=" * 60)
-        print(Fore.GREEN + Style.BRIGHT + "🎉 CLASSIFICATION COMPLETE! 🎉")
+        print(
+            Fore.GREEN
+            + Style.BRIGHT
+            + f"{EMOJI['party']} CLASSIFICATION COMPLETE! {EMOJI['party']}"
+        )
         print(Fore.GREEN + Style.BRIGHT + "=" * 60)
 
-        print(Fore.CYAN + "📊 Processing Summary:")
-        print(Fore.BLUE + f"   👨 Male images: {self.male_counter}")
-        print(Fore.MAGENTA + f"   👩 Female images: {self.female_counter}")
-        print(Fore.YELLOW + f"   🚫 No human detected: {self.no_human_counter}")
-        print(Fore.RED + f"   ❌ Errors: {self.error_counter}")
-        print(Fore.GREEN + f"   ✅ Total processed: {self.total_processed}")
+        print(Fore.CYAN + f"{EMOJI['chart']} Processing Summary:")
+        print(Fore.BLUE + f"   {EMOJI['male']} Male images: {self.male_counter}")
+        print(
+            Fore.MAGENTA + f"   {EMOJI['female']} Female images: {self.female_counter}"
+        )
+        print(
+            Fore.YELLOW
+            + f"   {EMOJI['no_human']} No human detected: {self.no_human_counter}"
+        )
+        print(Fore.RED + f"   {EMOJI['error']} Errors: {self.error_counter}")
+        print(
+            Fore.GREEN
+            + f"   {EMOJI['success']} Total processed: {self.total_processed}"
+        )
 
-        print(Fore.CYAN + "\n⏱️  Performance Stats:")
-        print(Fore.CYAN + f"   🕐 Total time: {elapsed_time:.2f} seconds")
+        print(Fore.CYAN + f"\n{EMOJI['stopwatch']}  Performance Stats:")
+        print(Fore.CYAN + f"   {EMOJI['clock']} Total time: {elapsed_time:.2f} seconds")
         print(
             Fore.CYAN
-            + f"   ⚡ Average per image: {elapsed_time / total_images:.3f} seconds"
+            + f"   {EMOJI['speed']} Average per image: {elapsed_time / total_images:.3f} seconds"
         )
-        print(Fore.CYAN + f"   🚀 Images per second: {total_images / elapsed_time:.2f}")
+        print(
+            Fore.CYAN
+            + f"   {EMOJI['rocket']} Images per second: {total_images / elapsed_time:.2f}"
+        )
 
         # Calculate accuracy
         successfully_classified = self.male_counter + self.female_counter
         if total_images > 0:
             success_rate = (successfully_classified / total_images) * 100
-            print(Fore.GREEN + f"   🎯 Success rate: {success_rate:.1f}%")
+            print(
+                Fore.GREEN + f"   {EMOJI['target']} Success rate: {success_rate:.1f}%"
+            )
 
     def run(self):
         """Main execution method"""
@@ -347,20 +429,28 @@ class GenderClassifier:
             output_folders = self.setup_output_folders(input_folder)
 
             # Confirm processing
-            print(Fore.YELLOW + f"\n🤔 Ready to process {len(image_files)} images.")
-            confirm = input(Fore.CYAN + "👉 Continue? (y/n): ").strip().lower()
+            print(
+                Fore.YELLOW
+                + f"\n{EMOJI['thinking']} Ready to process {len(image_files)} images."
+            )
+            confirm = (
+                input(Fore.CYAN + f"{EMOJI['point']} Continue? (y/n): ").strip().lower()
+            )
 
             if confirm not in ["y", "yes"]:
-                print(Fore.YELLOW + "👋 Operation cancelled. Goodbye!")
+                print(Fore.YELLOW + f"{EMOJI['wave']} Operation cancelled. Goodbye!")
                 return
 
             # Process images
             self.process_images_parallel(image_files, output_folders)
 
         except KeyboardInterrupt:
-            print(Fore.YELLOW + "\n⚠️  Process interrupted by user. Goodbye!")
+            print(
+                Fore.YELLOW
+                + f"\n{EMOJI['warning']}  Process interrupted by user. Goodbye!"
+            )
         except Exception as e:
-            print(Fore.RED + f"\n💥 Unexpected error: {e}")
+            print(Fore.RED + f"\n{EMOJI['boom']} Unexpected error: {e}")
 
 
 def main():

@@ -188,12 +188,6 @@ DeepFace downloads model weights into your home directory:
 ~/.deepface/weights
 ```
 
-On macOS for this machine, that expands to:
-
-```txt
-/Users/tarun/.deepface/weights
-```
-
 Common files include:
 
 ```txt

@@ -6,6 +6,7 @@ import shutil
 import glob
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
 
 def install(package, import_name=None):
@@ -212,11 +213,25 @@ class GenderClassifier:
                         image_path, output_folders["no_human"], "no_human"
                     )
 
-                # Handle both single face and multiple faces
+                # Handle both single face and multiple faces.
+                analysis: dict[str, Any] | None = None
                 if isinstance(result, list):
-                    result = result[0]  # Take first detected face
+                    if not result:
+                        return self.move_image(
+                            image_path, output_folders["no_human"], "no_human"
+                        )
+                    first_result = result[0]
+                    if isinstance(first_result, dict):
+                        analysis = first_result
+                elif isinstance(result, dict):
+                    analysis = result
 
-                gender = result["dominant_gender"].lower()
+                if analysis is None:
+                    return self.move_image(
+                        image_path, output_folders["errors"], "error"
+                    )
+
+                gender = str(analysis.get("dominant_gender", "")).lower()
 
                 if gender == "man":
                     return self.move_image(image_path, output_folders["male"], "male")

@@ -1,0 +1,42 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Environment and local config
+.env.local
+.env.*.local
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+
+# Generated app output
+classified_images/
+temp_test.jpg
+
+# ML/model caches
+.deepface/
+weights/
+models/
+*.h5
+*.keras
+*.pb
+*.onnx
+*.tflite
